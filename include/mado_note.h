@@ -1,8 +1,33 @@
-#include "mado_note.h"
-#include <stdio.h>
+#ifndef MADO_NOTE_H
+#define MADO_NOTE_H
+
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
+typedef struct {
+    char *buffer;     /* pointer to the pre-allocated buffer memory */
+    size_t size;
+    size_t idx;       /* current write index (next char position) */
+    bool is_full;     /* true when further writes are blocked */
+} NoteData;
+
+/* Function declarations */
+void mado_note_init(NoteData *note, char *external_buffer, size_t size);
+void mado_note_clear(NoteData *note);
+
+void mado_note_add_text(NoteData *note, const char *format, ...);
+
+void mado_note_add_array_u32(NoteData *note, const char *name, const uint32_t *data, size_t data_len);
+void mado_note_add_array_i32(NoteData *note, const char *name, const int32_t *data, size_t data_len);
+
+void mado_note_print(const NoteData *note);
+void mado_note_print_buffer(const NoteData *note);
+bool mado_note_print_file(const NoteData *nb, FILE *f);
+
+#if defined(MADO_NOTE_IMPLEMENTATION)
 
 // Initialize the buffer in NoteData
 void mado_note_init(NoteData *note, char *external_buffer, size_t size) {
@@ -26,14 +51,14 @@ void mado_note_clear(NoteData *note) {
 }
 
 // Add a text
-void mado_note_add_text(NoteData *buffer, const char *format, ...) {
+void mado_note_add_text(NoteData *note, const char *format, ...) {
     // 1. Basic Safety Checks
-    if (buffer == NULL || format == NULL || buffer->is_full) {
+    if (note == NULL || format == NULL || note->is_full) {
         return;
     }
 
     // 2. Format the input into a temporary string
-    char temp_buffer[NOTE_TEMP_BUFFER_SIZE];
+    char temp_buffer[note->size];
     va_list args;
     va_start(args, format);
     // vsnprintf returns the number of characters that *would* have been written
@@ -48,74 +73,74 @@ void mado_note_add_text(NoteData *buffer, const char *format, ...) {
     }
 
     // 3. Calculate remaining space
-    size_t remaining_space = (MADO_NOTE_FIXED_SIZE > buffer->idx) ? (MADO_NOTE_FIXED_SIZE - buffer->idx) : 0;
+    size_t remaining_space = (note->size > note->idx) ? (note->size - note->idx) : 0;
 
     // 4. Bounds Check
     if (text_length > remaining_space) {
-        buffer->is_full = true;
+        note->is_full = true;
         return;
     }
 
     // 5. Copy data (using memcpy is faster than a manual for-loop)
-    memcpy(buffer->buffer + buffer->idx, temp_buffer, text_length);
-    buffer->idx += text_length;
+    memcpy(note->buffer + note->idx, temp_buffer, text_length);
+    note->idx += text_length;
 
     // 6. Null termination (consistent with your previous logic)
-    if (buffer->idx < MADO_NOTE_FIXED_SIZE) {
-        buffer->buffer[buffer->idx] = '\0';
+    if (note->idx < note->size) {
+        note->buffer[note->idx] = '\0';
     }
 }
 
 // Add array
-void mado_note_add_array_u32(NoteData *buffer, const char *name, const uint32_t *data, size_t data_len) {
-    if (buffer == NULL || name == NULL) {
+void mado_note_add_array_u32(NoteData *note, const char *name, const uint32_t *data, size_t data_len) {
+    if (note == NULL || name == NULL) {
         return;
     }
     if (data_len == 0) {
-        mado_note_add_text(buffer, "%s: [];\n", name);
+        mado_note_add_text(note, "%s: [];\n", name);
         return;
     }
 
-    mado_note_add_text(buffer, "%s: [", name);
+    mado_note_add_text(note, "%s: [", name);
     for (size_t i = 0; i < data_len; ++i) {
         if (i + 1 < data_len) {
-            mado_note_add_text(buffer, "%u,", (unsigned)data[i]);
+            mado_note_add_text(note, "%u,", (unsigned)data[i]);
         } else {
-            mado_note_add_text(buffer, "%u];\n", (unsigned)data[i]);
+            mado_note_add_text(note, "%u];\n", (unsigned)data[i]);
         }
     }
 }
 
 // Add array
-void mado_note_add_array_i32(NoteData *buffer, const char *name, const int32_t *data, size_t data_len) {
-    if (buffer == NULL || name == NULL) {
+void mado_note_add_array_i32(NoteData *note, const char *name, const int32_t *data, size_t data_len) {
+    if (note == NULL || name == NULL) {
         return;
     }
     if (data_len == 0) {
-        mado_note_add_text(buffer, "%s: [];\n", name);
+        mado_note_add_text(note, "%s: [];\n", name);
         return;
     }
 
-    mado_note_add_text(buffer, "%s: [", name);
+    mado_note_add_text(note, "%s: [", name);
     for (size_t i = 0; i < data_len; ++i) {
         if (i + 1 < data_len) {
-            mado_note_add_text(buffer, "%d,", (int)data[i]);
+            mado_note_add_text(note, "%d,", (int)data[i]);
         } else {
-            mado_note_add_text(buffer, "%d];\n", (int)data[i]);
+            mado_note_add_text(note, "%d];\n", (int)data[i]);
         }
     }
 }
 
-// Print current text in the buffer
-void mado_note_print(const NoteData *buffer) {
-    if (buffer == NULL) {
+// Print current text in the note->buffer
+void mado_note_print(const NoteData *note) {
+    if (note == NULL) {
         return;
     }
 
-    if (buffer->idx < MADO_NOTE_FIXED_SIZE && buffer->buffer[buffer->idx] == '\0') {
-        printf("%s", buffer->buffer);
+    if (note->idx < note->size && note->buffer[note->idx] == '\0') {
+        printf("%s", note->buffer);
     } else {
-        fwrite(buffer->buffer, 1, buffer->idx, stdout);
+        fwrite(note->buffer, 1, note->idx, stdout);
     }
 }
 
@@ -141,7 +166,6 @@ void mado_note_print_buffer(const NoteData *note) {
     printf("%s", temp_log_buffer);
 }
 
-
 // Print current text to a file
 bool mado_note_print_file(const NoteData *nb, FILE *f) {
     if (nb == NULL || f == NULL) {
@@ -164,3 +188,7 @@ bool mado_note_print_file(const NoteData *nb, FILE *f) {
 
     return true;
 }
+
+#endif // MADO_NOTE_IMPLEMENTATION
+
+#endif /* MADO_NOTE_H */
